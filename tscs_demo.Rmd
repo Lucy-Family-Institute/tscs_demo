@@ -1,0 +1,511 @@
+---
+title: "Time Series Cross Sectional (TSCS) Data Tutorial"
+output: html_notebook
+bibliography: ref.bib
+link-citations: true
+date: "July 13, 2022"
+---
+
+# Setup
+## Downloads
+[R](https://cran.r-project.org/bin/windows/base/)
+
+[Rstudio IDE](https://www.rstudio.com/products/rstudio/download/)
+
+## Packages
+*install.packages()* and *library()* for package downloads and loading.  Here we'll load some useful packages [c converts elements into a vector]
+
+```{r, message=F, warning=F}
+#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest"))
+library("tidyverse")
+library("data.table")
+library("readstata13")
+library("plm")
+library("bife")
+library("survival")
+library("brglm2")
+library("ivreg")
+library("lmtest")
+
+
+#setwd()
+set.seed(1015)
+```
+
+# TSCS Data
+TSCS data have observations of multiple units *N* over time *T*.
+
+Each specific observation within the data is of one unit at one time, i.e.
+
+```{r, warn=F}
+data<-read.dta13("ms_mil_spend_data.dta")
+data %>%
+  filter(ccode==2, year==2000)
+```
+This observation is for the US (2) for the year 2000.
+
+```{r}
+data %>% 
+  arrange(ccode, year) %>%
+  dplyr::select(ccode, year, LMILEX, v2x_polyarchy)
+
+data %>%
+  dplyr::filter(ccode %in% c(2,20)) %>%
+  ggplot(aes(x=year, y=LMILEX)) +
+  geom_line() +
+  facet_wrap(~ccode)
+```
+# Within / Between Decomposition
+
+```{r}
+summary(data$LMILEX)
+
+#Between unit variation
+data %>%
+  group_by(ccode) %>%
+  summarize(between=mean(na.omit(LMILEX)))%>%
+  dplyr::select(between) %>%
+  summary()
+
+#Within unit variation
+data %>%
+  group_by(ccode) %>%
+  mutate(between=mean(na.omit(LMILEX)),
+         within=LMILEX-mean(na.omit(LMILEX))) %>%
+  dplyr::select(within) %>%
+  summary()
+```
+
+# Pooling
+The simplest approach to estimating a model on TSCS is to pool the data:
+
+$Y_{it}=\beta_0+\beta_1X_{it}+u_{it}$
+
+Where Y is the DV, X is the IV, $\beta_0$ is the intercept, $\beta_1$ is the coefficient on X and $u_{it}$ is the error.
+
+What are we assuming here?
+
+All of the $N$ units share a common intercept $\beta_0$ and a common slope $\beta_1$ on X.
+
+Whether pooling is appropriate depends on whether those assumptions are correct.  Note that these assumptions are not testable within the pooled model.
+
+## Clean Pool
+```{r}
+#Monte Carlo simulations to better control the relationships
+N<-seq(1,5,1)
+Time<-seq(1,50,1)
+clean<-expand.grid(N, Time)
+names(clean)<-c("N", "Time")
+clean<- clean %>% 
+  arrange(N, Time)
+
+tibble(clean)
+
+#Draw the IV, DV, error
+clean$X<-rnorm(nrow(clean), 1, .25)
+clean$Y<-3-2*clean$X+rnorm(nrow(clean), 0, .5)
+
+tibble(clean)
+
+#Run the pooled model
+clean_pool<-lm(Y~X, data=clean)
+summary(clean_pool)
+
+#Plot to understand why this worked
+clean %>%
+  ggplot(aes(x=X, y=Y))+
+  geom_point(aes(color=as.factor(N)))+
+  geom_smooth(method=lm)
+
+```
+Pooled model works here because there is no difference in the underlying relationship - we know this because we drew X without respect to N, T
+
+## Dirty Pool
+
+Let's assume instead that there exists some unit-level heterogeneity.  Some $Z$ affects both $Y$ and $X$ but is time constant.
+
+You may recognize this as the setup for OVB.
+
+```{r}
+#Monte Carlo simulations to better control the relationships
+N<-seq(1,5,1)
+Time<-seq(1,50,1)
+dirty<-expand.grid(N, Time)
+names(dirty)<-c("N", "Time")
+dirty<- dirty %>% 
+  arrange(Time, N)
+
+#Draw the unobserved effect, IV, DV, error
+Z<-rnorm(length(unique(dirty$N)), 0, .5)
+dirty$Z<-rep(Z, length(Time))
+dirty$X<-dirty$Z+rnorm(nrow(dirty), 1, .25)
+dirty$Y<-3-2*dirty$X+4*dirty$Z+rnorm(nrow(dirty),0, .5)
+
+#Run the pooled model
+dirty_pool<-lm(Y~X, data=dirty)
+summary(dirty_pool)
+
+#Plot the pooled model - what are we looking at?
+dirty %>%
+  ggplot(aes(x=X, y=Y))+
+  geom_point(aes(color=as.factor(N)))+
+  geom_smooth(method=lm, se=F)
+
+#Plot the per unit regressions
+dirty %>%
+  ggplot(aes(x=X, y=Y, color=as.factor(N)))+
+  geom_point()+
+  geom_smooth(method=lm, se=F)
+
+```
+In this case, pooling estimates a weak positive relationship between X and Y, despite the fact that the true relationship is negative.
+
+This occurs because there is omitted variable bias introduced by Z.
+
+Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+\epsilon_{it}$ 
+
+# Fixed Effects
+With TSCS data that contains time-constant unit-level omitted variable bias, fixed effects can be used to estimate the unbiased relationship, even if the omitted variable $Z$ is not observed.
+
+```{r}
+fe<-plm(Y~X, dirty, index=c("N", "Time"), method="within")
+summary(fe)
+```
+
+Why does this work?
+
+The fixed effect estimator considers only the within-unit variation, and removes the between unit variation.
+
+In other words, the data are group demeaned- each observation for each *i* is subtracted from the mean for that unit over time.
+
+Because the effect of *Z* is constant over time, demeaning removes its effect and the bias it introduces
+
+We can do this manually:
+
+```{r}
+demean<-dirty %>%
+  arrange(N,Time)%>%
+  group_by(N) %>%
+  mutate(mean_X=mean(X),
+         mean_Y=mean(Y),
+         demean_X=X-mean_X,
+         demean_Y=Y-mean_Y)
+demean
+fe_manual<-lm(demean_Y~demean_X-1, data=demean)
+summary(fe_manual)
+
+demean %>%
+  ggplot(aes(x=demean_X, y=demean_Y))+
+  geom_point(aes(color=as.factor(N)))+
+  geom_smooth(method=lm, se=F)
+
+```
+## Interpretation
+Interpretation is standard, but with a caveat
+```{r}
+summary(fe)
+sd(dirty$X)
+coef(fe)*sd(dirty$X)
+
+within<- dirty %>%
+  group_by(N) %>%
+  mutate(within=X-mean(X))%>%
+  dplyr::select(within)
+
+sd(within$within)
+coef(fe)*sd(within$within)
+```
+
+Takeaway: Coefficients on Linear FE regressors are correctly interpreted as the effect of a one unit increase in *the within unit* X.  The within unit variance is always no larger than the total variance in X (often significantly smaller, here about 1/2).  Calculate substantive effects using within X. (@mummolo2018improving)
+
+## Drawbacks
+1. No estimates for time-invariant variables
+
+```{r}
+time_inv<-dirty
+time_inv$K<-ifelse(dirty$N<2, 1, 0)
+time_inv$Y<-3-2*time_inv$X+4*time_inv$Z+-3*time_inv$K+rnorm(nrow(time_inv),0, .5)
+
+drop_model<-plm(Y~X+K, model="within", index = c("N", "Time"), data=time_inv)
+summary(drop_model)
+
+#Why not? 
+time_inv %>%
+  group_by(N) %>%
+  mutate(var_k=K-mean(K)) %>%
+  select(var_k) %>%
+  summary()
+
+#The within transform sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
+```
+
+2. Loss of observations without variation in the DV in conditional logistic regression. 
+```{r}
+data %>%
+  group_by(ccode) %>%
+  summarize(var_dem=var(na.omit(vdem_dem)))
+
+summary(clogit(vdem_dem~LMILEX+strata(ccode), data=data))
+```
+A lot has been made of this issue, but does it matter? (@cook2020fixed)
+
+"Feels" problematic that the model ignores a portion of the data.  Can be severe if the event in question is rare/common.
+
+Concrete issues:
+
+1. No estimates of FE, so no individual MEs (similar to Cox PH model).
+
+2. Biased estimates of baseline rate of event because non-event units are removed. Correct interpretation is baseline rate for units that experience the event.
+
+### Penalized ML 
+@cook2020fixed recast the unconditional (unit-dummy) FE problem as one of *separation*.
+
+Separation occurs when a variable perfectly predicts the DV- here the unit does. (Imagine a 2x2 table, if one or more cells are empty, this is separation)
+
+ML solutions *do not exist* under separation- the LL is flat because fit can always be improved by pushing the separating coefficient more towards negative (positive) infinity.  
+
+Well known solution is to penalize the maximum likelihood to punish large coefficients (may be familiar as ridge/lasso, but specific penalty is different.)
+
+```{r}
+penalized_fe<-glm(vdem_dem~LMILEX+as.factor(ccode), data=data,
+                  familty="binomial"(link="logit"), method="brglmFit")
+summary(penalized_fe)
+```
+
+
+# Random Effects
+What if $Z$ does not cause $X$?
+
+There's no OVB (recall necessary conditions)
+
+FE estimator is still unbiased
+
+Pooled estimator unbiased, but incorrect SE/t-stats because unit effect creates serial correlation in errors
+
+
+```{r}
+#Make some data to better control the relationships
+N<-seq(1,5,1)
+T<-seq(1,50,1)
+random<-expand.grid(N, T)
+names(random)<-c("N", "T")
+random<- random %>% 
+  arrange(T, N)
+
+#Draw the unobserved effect, IV, DV, error
+Z<-rnorm(length(unique(random$N)), -2, .5)
+random$Z<-rep(Z, length(T))
+random$X<-rnorm(nrow(random), 1, .25)
+random$Y<-3-2*random$X+4*random$Z+rnorm(nrow(random),0, .5)
+
+#Run the pooled model
+random_pool<-lm(Y~X, data=random)
+summary(random_pool)
+
+#Plot the pooled model - what are we looking at?
+random %>%
+  ggplot(aes(x=X, y=Y))+
+  geom_point(aes(color=as.factor(N)))+
+  geom_smooth(method=lm, se=F)
+
+#Plot unit intercepts/slopes
+random %>%
+  ggplot(aes(x=X, y=Y, color=as.factor(N)))+
+  geom_point()+
+  geom_smooth(method=lm, se=F)
+
+#RE estimator
+re<-plm(Y~X, random, model = "random")
+summary(re)
+
+```
+
+# Dynamic Models
+
+```{r}
+#Check how our data look
+data %>%
+  dplyr::select(c(ccode, year, LMILEX, v2x_polyarchy)) %>%
+  filter(ccode<100) %>%
+  pivot_longer(cols = c(LMILEX, v2x_polyarchy), values_to = "values")%>%
+  ggplot(aes(y=values, x=year, color=as.factor(ccode)))+
+  geom_line()+
+  facet_wrap(~name, scales="free_y")
+
+#Difference these out to be safe
+fd<-pdata.frame(data, index = c("ccode", "year"))
+fd$d_lmilex=diff(fd$LMILEX)
+fd$d_polyarchy=diff(fd$v2x_polyarchy)
+
+fd %>%
+  dplyr::select(c(ccode, year, d_lmilex, d_polyarchy)) %>%
+  filter(ccode %in% seq(2,99,1)) %>%
+  pivot_longer(cols = c(d_lmilex, d_polyarchy), values_to = "values")%>%
+  ggplot(aes(y=values, x=year, color=as.factor(ccode)))+
+  geom_point()+
+  facet_wrap(~name, scales="free_y")
+```
+
+## Static
+
+More details in @de2008taking
+
+
+```{r}
+static<-lm(d_lmilex~d_polyarchy, data=fd)
+summary(static)
+
+#Illustrate the impact of 1 SD change in polyarchy (temporary)
+time<-seq(1,10,1)
+dem<-c(rep(0,2), 
+       sd(na.omit(fd$d_polyarchy)),
+       rep(0, 7))
+pred_dat<-cbind.data.frame(time,dem)
+pred_dat$milex_hat<-pred_dat$dem*coef(static)[2]
+pred_dat %>%
+  ggplot(aes(x=time, y=milex_hat))+
+  geom_line()
+```
+If the regression equation is $Y_t=\beta_0+\beta_1X_t+\epsilon_t$
+
+The effect of $X_t$ on $Y_t$ is $\frac{\delta Y_t}{\delta X_t}$ which is $\beta_1$
+
+Moving forward one period: $Y_{t+1}=\beta_0+\beta_1X_{t+1}+\epsilon_{t+1}$
+
+The derivative of that regression with respect to $X_t$ is zero. 
+
+## Finite Lag
+```{r}
+fd$lag_polyarchy=lag(fd$d_polyarchy)
+fd$lag_lmilex=lag(fd$d_lmilex)
+
+lag1<-lm(d_lmilex~d_polyarchy+lag_polyarchy, data=fd)
+summary(lag1)
+
+pred_dat<-pred_dat %>% 
+  mutate(lag_dem=dplyr::lag(dem))
+pred_dat$milex_hat<-pred_dat$dem*coef(lag1)[2]+pred_dat$lag_dem*coef(lag1)[3]
+pred_dat %>%
+  ggplot(aes(x=time, y=milex_hat))+
+  geom_line()
+```
+
+If the regression equation is $Y_t=\beta_0+\beta_1X_t+\beta_2X_{t-1}+\epsilon_t$
+
+The effect of $X_t$ on $Y_t$ is $\frac{\delta}{\delta X} \beta_0+\beta_1X_t+\beta_2X_{t-1}+\epsilon_t$ which is $\beta_1$
+
+Moving forward one period: $Y_{t+1}=\beta_0+\beta_1X_{t+1}+\beta_2X_t+\epsilon_{t+1}$
+
+The derivative of that regression with respect to $X_t$ is $\beta_2$
+
+Derivative in periods beyond $t+1$ is zero as before.
+
+## Lagged Dependent Variable Models
+
+```{r}
+ldv<-lm(d_lmilex~lag_lmilex+d_polyarchy, data=fd)
+summary(ldv)
+
+pred_dat[1:3,]$milex_hat<-coef(ldv)[3]*pred_dat[1:3,]$dem
+pred_dat[4:10,]$milex_hat<-coef(ldv)[2]^(pred_dat[4:10,]$time-3)*coef(ldv)[3]*pred_dat[3,"dem"]
+pred_dat %>%
+  ggplot(aes(x=time, y=milex_hat))+
+  geom_line()
+
+#What about a permanent shift?
+coef(ldv)
+lrm<-coef(ldv)[3]*sd(na.omit(fd$d_polyarchy))/(1-coef(ldv)[2])
+lrm
+```
+
+In the case of a temporary shock to X, the effect decays geometrically by assumption (e.g., forced by the assumption of the model)
+
+To see that, let's consider the effect of $X_t$ at time $t+1$ and $t+2$
+
+The general equation $Y_{t}=\beta_0+\alpha Y_{t-1}+\beta_1X_{t}+\epsilon_{t}$
+
+At $t+1$ we have
+
+$Y_{t+1}=\beta_0+\alpha Y_{t}+\beta_1X_{t+1}+\epsilon_{t+1}$
+
+Substitute for $Y_t$ - drop out the error terms, constant for ease
+
+$Y_{t+1}=\alpha(\alpha Y_{t-1}+\beta_1X_{t})+\beta_1X_{t+1}$
+
+First derivative with respect to $X_t$ is $\alpha\times\beta_1$
+
+This makes intuitive sense - $X_t$ affects $Y_t$ by $\beta_1$.  In turn, $Y_t$ affects $Y_{t+1}$ by $\alpha$, the extent to which $Y$ is serially correlated. 
+
+Similarly at $t+2$
+
+$Y_{t+2}=\beta_0+\alpha Y_{t+1}+\beta_1X_{t+2}+\epsilon_{t+2}$
+
+Substitute for $Y_{t+1}$
+
+$Y_{t+2}=\beta_0+\alpha (\alpha Y_{t}+\beta_1X_{t+1})+\beta_1X_{t+2}+\epsilon_{t+2}$
+
+And again for $Y_{t}$
+
+$Y_{t+2}=\beta_0+\alpha [\alpha(\alpha Y_{t-1}+\beta_1X_{t})+\beta_1X_{t+1}]+\beta_1X_{t+2}+\epsilon_{t+2}$
+
+This is kind of ugly, but anything that's not multiplied by $X_t$ can go away, which is basically everything
+
+We're left with $\alpha^2 \times \beta_1$
+
+Generalizes: the effect of $X_t$ any arbitrary leads into the future is going to be $\alpha^d \times \beta_1$ where $d$ is however many leads we want. 
+
+Note that the effect of $X_t$ decays because of the requirement that $\vert \alpha \vert < 1$ - otherwise the effect does not decay at all ($= 1$) or increases in time ($>1$).
+
+### Serial correlation in error term
+Haven't made too much of this until now.
+
+In general, serial correlation in the error is not a big issue (no bias / inconsistency).
+
+We do get bad SE/t-stats under serial correlation.
+
+Two approaches:
+
+1. Just use OLS and clean up the SEs to be robust to serial correlation (HAC SEs, PCSEs)
+
+2. Try to better model the dynamics to eliminate serial correlation - for example with deeper lags of $Y$
+
+But, with an LDV, serial correlation in the error creates bias.  (@achen2000lagged, @keele2006dynamic)
+
+Need to be careful to ensure no serial correlation in error term of the model.
+
+```{r}
+lmtest::bgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd)
+```
+
+Fail to reject the null of no serial correlation.
+
+# Dynamic Panel Models
+If we assume unit effects that impact $Y$ (as in the FE case), the LDV model is biased (@wawro2002estimating is an accessible summary)  
+
+This is because the static individual effects are relegated to the error term.
+
+The LDV is correlated with those static unit effects, so by putting it on the RHS we've created bias.
+
+Unlike in the static case, the FE estimator does not remove the bias.
+
+## Anderson-Hsiao Estimator
+
+1. First difference the regression equation to remove correlation between LDV and FE
+
+First differenced LDV is still correlated with first differenced error
+
+But, this can be handled with standard IV approaches: 
+
+2.  Instrument for $\Delta Y_{t-1}$
+
+Deeper lags of $Y$ are valid instruments, specifically $Y_{t-2}$- no need to find an instrument (although if you have one that also works!).  However, this depends on no serial correlation in the errors.
+
+In general, the AH estimator has been superseded by GMM estimators that build on the deeper lag approach, so it's typically not a named routine.  But we can estimate it by hand via standard 2SLS.
+
+```{r}
+fd$l2_lmilex=lag(fd$d_lmilex, 2)
+ah<-ivreg(d_lmilex~lag_lmilex+d_polyarchy| l2_lmilex+d_polyarchy, data=fd )
+summary(ah)
+```
+
+Note that we've only used ivreg, which is standard 2SLS estimation (not 2SLS with FE).  This is because we've swept out the unit effects via first differencing already. 
