@@ -8,7 +8,7 @@ date: "July 13, 2022"
 
 # Setup
 ## Downloads
-[R](https://cran.r-project.org/bin/windows/base/)
+[R](https://cran.r-project.org/bin/)
 
 [Rstudio IDE](https://www.rstudio.com/products/rstudio/download/)
 
