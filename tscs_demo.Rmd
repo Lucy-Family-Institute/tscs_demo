@@ -27,7 +27,6 @@ library("brglm2")
 library("ivreg")
 library("lmtest")
 
-
 #setwd()
 set.seed(1015)
 ```
@@ -37,7 +36,7 @@ TSCS data have observations of multiple units *N* over time *T*.
 
 Each specific observation within the data is of one unit at one time, i.e.
 
-```{r, warn=F}
+```{r, warn=F, message=F}
 data<-read.dta13("ms_mil_spend_data.dta")
 data %>%
   filter(ccode==2, year==2000)
@@ -224,7 +223,7 @@ Takeaway: Coefficients on Linear FE regressors are correctly interpreted as the 
 ```{r}
 time_inv<-dirty
 time_inv$K<-ifelse(dirty$N<2, 1, 0)
-time_inv$Y<-3-2*time_inv$X+4*time_inv$Z+-3*time_inv$K+rnorm(nrow(time_inv),0, .5)
+time_inv$Y<-3-2*time_inv$X+4*time_inv$Z-3*time_inv$K+rnorm(nrow(time_inv),0, .5)
 
 drop_model<-plm(Y~X+K, model="within", index = c("N", "Time"), data=time_inv)
 summary(drop_model)
@@ -236,7 +235,7 @@ time_inv %>%
   select(var_k) %>%
   summary()
 
-#The within transform sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
+#The FE estimator sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
 ```
 
 2. Loss of observations without variation in the DV in conditional logistic regression. 
