@@ -1,13 +1,26 @@
 ---
 title: "Time Series Cross Sectional (TSCS) Data Tutorial"
-output: html_notebook
+output:
+  html_document:
+    toc: true
+    df_print: paged
+date: "January 13, 2023"
+link-citations: yes
 bibliography: ref.bib
-link-citations: true
-date: "July 13, 2022"
 ---
+
+# Introduction
+
+This workshop offers an introduction to time series cross sectional (TSCS) data with a focus on applications in R.  Some familiarity with time series econometrics, as well as R, is assumed.  We will cover some basic theoretical results, but but this course is not intended to substitute for a more detailed theoretical treatment.
+
+The workshop starts with some basic description of the structure of TSCS data and the risks of the pooled (OLS) estimator, then covers standard approaches to unit-level heterogeneity: the fixed effect (within) estimator, the random effect estimator.  Interpretation and drawbacks of the fixed effect estimator are discussed, as well as a potential solution to the time invariant covariate problem via penalized maximum likelihood.  We will discuss testing the key assumption behind the random effects model, and introduce the unifying "within-between" model. 
+
+The second section focuses on issues related to time.  We start by considering the implications of a static model, then incorporate basic dynamics via the finite distributed lag and lagged dependent variable (LDV) specification.  We briefly discuss tests for serial correlation in the model errors, as well as introduce the Anderson-Hsiao estimator for FE estimation with an LDV.
 
 # Setup
 ## Downloads
+[Training Repo, including this file](https://github.com/Lucy-Family-Institute/tscs_demo.git)
+
 [R](https://cran.r-project.org)
 
 [Rstudio IDE](https://www.rstudio.com/products/rstudio/download/)
@@ -15,9 +28,10 @@ date: "July 13, 2022"
 ## Packages
 *install.packages()* and *library()* for package downloads and loading.  Here we'll load some useful packages [c converts elements into a vector]
 
-```{r, message=F, warning=F}
-#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest"))
+```{r, results='hide', message=F, warning=F}
+#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest", "tseries"))
 library("tidyverse")
+library("tseries")
 library("data.table")
 library("readstata13")
 library("plm")
@@ -36,7 +50,7 @@ TSCS data have observations of multiple units *N* over time *T*.
 
 Each specific observation within the data is of one unit at one time, i.e.
 
-```{r, warn=F, message=F}
+```{r, warning=F, message=F}
 data<-read.dta13("ms_mil_spend_data.dta")
 data %>%
   filter(ccode==2, year==2000)
@@ -54,6 +68,7 @@ data %>%
   geom_line() +
   facet_wrap(~ccode)
 ```
+
 # Within / Between Decomposition
 
 ```{r}
@@ -117,6 +132,7 @@ clean %>%
   geom_smooth(method=lm)
 
 ```
+
 Pooled model works here because there is no difference in the underlying relationship - we know this because we drew X without respect to N, T
 
 ## Dirty Pool
@@ -161,7 +177,8 @@ In this case, pooling estimates a weak positive relationship between X and Y, de
 
 This occurs because there is omitted variable bias introduced by Z.
 
-Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+\epsilon_{it}$ 
+Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+\epsilon_{it}$
+
 
 # Fixed Effects
 With TSCS data that contains time-constant unit-level omitted variable bias, fixed effects can be used to estimate the unbiased relationship, even if the omitted variable $Z$ is not observed.
@@ -273,6 +290,7 @@ summary(penalized_fe)
 
 
 # Random Effects
+
 What if $Z$ does not cause $X$?
 
 There's no OVB (recall necessary conditions)
@@ -318,10 +336,85 @@ re<-plm(Y~X, random, model = "random")
 summary(re)
 
 ```
+# Testing the validity of the RE assumption
+
+In order to be unbiased, the Random Effects estimator requires that there is no correlation between the unit effects and the explanatory variables.
+
+This assumption is typically tested with a Hausman test comparing an FE and RE model with the same specification
+
+```{r}
+#Fit a FE model to the same data
+fe<-plm(Y~X, random, model = "within")
+
+#Hausman Test
+phtest(fe, re)
+
+#Note, order of the arguments does not matter
+
+#Can also calculate the Hausman statistic by hand
+t(coef(fe) - coef(re)[2])%*% solve(vcov(fe)-vcov(re)[2,2]) %*% (coef(fe)-coef(re)[2])
+
+
+```
+
+The null hypothesis of the Hausman test is (roughly) that the coefficient vectors are equal in both the FE and RE models.  Rejection indicates the two vectors are statistically different.  Rejection is typically taken to suggest violation of the RE assumption.
+
+Recall that both the FE and RE models are consistent under the RE assumptions (the former is not efficient).  Thus, if the RE assumptions hold, we would not expect a difference.  In contrast, if the RE assumption regarding the correlation of the individual effects with the independent variables is violated, only the FE estimator is consistent and the RE estimator is biased.  Therefore, we would expect differences in the estimates.
+
+# The Within-Between Model
+Rather than choosing between fixed and random effects, we can estimate a compound model.
+
+Recall that the goal of both the FE and RE models is to account for unit-level heterogeneity.  The fundamental difference is that the RE model requires no covariance between the unit effects and the error.  The FE model is agnostic on this because it eliminates all variation on all variables due to unit effects via the within transform (subtracting the unit means from each realization of $Y$, $X$)
+
+The risk of the RE model, then, can be thought of as correlation between these unit means and the error term.  As with standard OVB, putting the unit means into the equation will remove the bias and allow the RE estimator to recover the unbiased coefficients on $X$.
+
+The traditional approach comes from @mundlak1978pooling and involves estimating the following equation with the RE estimator:
+
+$Y_{it}=\beta_1X_{it}+\beta_2\overline{X_i}+\epsilon_{it}$
+
+Where $\overline{X_i}$ is the unit level mean of $X$
+
+Alternatively, the time-specific realizations of $X$ can be within-transformed prior to estimation.
+
+$Y_{it}=\beta_1(X_{it}-\overline{X_i})+\beta_2\overline{X_i}+\epsilon_{it}$
+
+
+The specific model you should use depends on which coefficients are more of interest: the individual or aggregate.  The former (Mundlak) specification facilitates interpretation of the aggregate (group mean) variable.
+
+The group demeaning in the latter approach ensures that the individual realizations are uncorrelated with the group-level mean.  As a result, the group-level term cannot be interpreted, because it does not control for the effect of the individual realizations.
+
+```{r}
+#We'll fit the second equation to our RE data
+
+#First, we have to group demean
+demean_random<-random %>%
+  arrange(N,T)%>%
+  group_by(N) %>%
+  mutate(mean_X=mean(X),
+         demean_X=X-mean_X)
+
+# Now include both X terms in the RE model
+rebw<-plm(Y~demean_X + mean_X, demean_random, model = "random")
+
+coef(rebw)
+coef(fe)
+```
+Notice that the coefficient on the within effect from the REBW model is the same as the FE estimate.
+
+We can also estimate the Mundlak version
+```{r}
+#Mundlak formulation
+mundlak<-plm(Y~X + mean_X, demean_random, model = "random")
+coef(mundlak)
+
+```
+
+Again, we've successfully purged the coefficients on the individual realizations of $X$.  Our coefficient on $\overline{X}$ has changed.  The REWB estimate was `r coef(rebw)[3]` which we can see here is actually the sum of the between and within coefficients from the Mundlak estimator `r coef(mundlak)[3]` and `r coef(mundlak)[2]`
 
 # Dynamic Models
 
 ```{r}
+
 #Check how our data look
 data %>%
   dplyr::select(c(ccode, year, LMILEX, v2x_polyarchy)) %>%
@@ -330,7 +423,56 @@ data %>%
   ggplot(aes(y=values, x=year, color=as.factor(ccode)))+
   geom_line()+
   facet_wrap(~name, scales="free_y")
+```
 
+## Panel Unit Root Testing
+
+Panel unit root testing is difficult and R implementations are somewhat basic
+
+We can perform our own test via the p-value aggregation method of @choi2001unit
+
+We perform an augmented Dickey-Fuller test on each panel, aggregate the p-values
+
+Specific aggregation is $-2\sum_{n}^{N} ln(p_n)$
+
+Test statistic is distributed $\chi^2(2N)$
+
+N here indicates number of panels
+
+We're going to loop over the panels, perform the test, store the results
+
+(You could also do this as a vectorized function...)
+
+```{r, warning=F, message=F}
+pvals <- NULL
+for (i in unique(data$ccode)){
+  try(dfuller <- adf.test(data[data$ccode==i, "LMILEX"], k = 1))
+  pvals<-rbind(pvals, dfuller$p.value)
+}
+
+pvals
+
+#Choi's P-value
+test_stat<- -2*sum(log(na.omit(pvals)))
+test_stat 
+
+#That's going to reject, but let's get a p-value for completeness
+#Test is distributed chi2(2N) where N is panels
+
+round(pchisq(test_stat, df=2*nrow(na.omit(pvals)), lower.tail = F), digits=3)
+```
+In the p-value aggregation chase, we are testing a specific null hypothesis that all the panels have a unit root against the alternative that at least one is stationary.
+
+That might not be the most reassuring rejection; other tests have different nulls.
+
+## First Differencing
+
+The panel ADF didn't indicate a need for differencing, but let's to illustrate.
+
+(Usual caveats here; first differencing is only appropriate for I(1) series, you need to test the differenced series for stationarity, etc.)
+
+
+```{r}
 #Difference these out to be safe
 fd<-pdata.frame(data, index = c("ccode", "year"))
 fd$d_lmilex=diff(fd$LMILEX)
@@ -348,7 +490,6 @@ fd %>%
 ## Static
 
 More details in @de2008taking
-
 
 ```{r}
 static<-lm(d_lmilex~d_polyarchy, data=fd)
@@ -507,4 +648,6 @@ ah<-ivreg(d_lmilex~lag_lmilex+d_polyarchy| l2_lmilex+d_polyarchy, data=fd )
 summary(ah)
 ```
 
-Note that we've only used ivreg, which is standard 2SLS estimation (not 2SLS with FE).  This is because we've swept out the unit effects via first differencing already. 
+Note that we've only used ivreg, which is standard 2SLS estimation (not 2SLS with FE).  This is because we've swept out the unit effects via first differencing already.
+
+#References
