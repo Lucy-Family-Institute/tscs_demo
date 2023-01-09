@@ -2,7 +2,10 @@
 title: "Time Series Cross Sectional (TSCS) Data Tutorial"
 output:
   html_document:
-    toc: true
+    toc: yes
+    df_print: paged
+  html_notebook:
+    toc: yes
     df_print: paged
 date: "January 13, 2023"
 link-citations: yes
