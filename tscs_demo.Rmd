@@ -1,20 +1,20 @@
 ---
 title: "Time Series Cross Sectional (TSCS) Data Tutorial"
 output:
-  html_document:
-    toc: yes
-    df_print: paged
   html_notebook:
     toc: yes
     df_print: paged
-date: "January 13, 2023"
+  html_document:
+    toc: yes
+    df_print: paged
+date: "February 8, 2023"
 link-citations: yes
 bibliography: ref.bib
 ---
 
 # Introduction
 
-This workshop offers an introduction to time series cross sectional (TSCS) data with a focus on applications in R.  Some familiarity with time series econometrics, as well as R, is assumed.  We will cover some basic theoretical results, but but this course is not intended to substitute for a more detailed theoretical treatment.
+This workshop offers an introduction to time series cross sectional (TSCS) data with a focus on applications in R.  Some familiarity with time series cross sectional econometrics, as well as R, is assumed.  We will cover some basic theoretical results, but this workshop is not intended to substitute for a more detailed theoretical treatment.
 
 The workshop starts with some basic description of the structure of TSCS data and the risks of the pooled (OLS) estimator, then covers standard approaches to unit-level heterogeneity: the fixed effect (within) estimator, the random effect estimator.  Interpretation and drawbacks of the fixed effect estimator are discussed, as well as a potential solution to the time invariant covariate problem via penalized maximum likelihood.  We will discuss testing the key assumption behind the random effects model, and introduce the unifying "within-between" model. 
 
@@ -104,6 +104,8 @@ What are we assuming here?
 
 All of the $N$ units share a common intercept $\beta_0$ and a common slope $\beta_1$ on X.
 
+Standard OLS assumptions regarding the error term (specifically zero conditional mean)
+
 Whether pooling is appropriate depends on whether those assumptions are correct.  Note that these assumptions are not testable within the pooled model.
 
 ## Clean Pool
@@ -121,7 +123,6 @@ tibble(clean)
 #Draw the IV, DV, error
 clean$X<-rnorm(nrow(clean), 1, .25)
 clean$Y<-3-2*clean$X+rnorm(nrow(clean), 0, .5)
-
 tibble(clean)
 
 #Run the pooled model
@@ -136,7 +137,7 @@ clean %>%
 
 ```
 
-Pooled model works here because there is no difference in the underlying relationship - we know this because we drew X without respect to N, T
+Pooled model works here because there is no difference in the underlying relationship - we know this because we drew X without respect to N, Time
 
 ## Dirty Pool
 
@@ -180,8 +181,7 @@ In this case, pooling estimates a weak positive relationship between X and Y, de
 
 This occurs because there is omitted variable bias introduced by Z.
 
-Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+\epsilon_{it}$
-
+Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+u_{it}$
 
 # Fixed Effects
 With TSCS data that contains time-constant unit-level omitted variable bias, fixed effects can be used to estimate the unbiased relationship, even if the omitted variable $Z$ is not observed.
@@ -242,7 +242,7 @@ Takeaway: Coefficients on Linear FE regressors are correctly interpreted as the 
 
 ```{r}
 time_inv<-dirty
-time_inv$K<-ifelse(dirty$N<2, 1, 0)
+time_inv$K<-ifelse(dirty$N<=2, 1, 0)
 time_inv$Y<-3-2*time_inv$X+4*time_inv$Z-3*time_inv$K+rnorm(nrow(time_inv),0, .5)
 
 drop_model<-plm(Y~X+K, model="within", index = c("N", "Time"), data=time_inv)
@@ -291,7 +291,6 @@ penalized_fe<-glm(vdem_dem~LMILEX+as.factor(ccode), data=data,
 summary(penalized_fe)
 ```
 
-
 # Random Effects
 
 What if $Z$ does not cause $X$?
@@ -306,15 +305,15 @@ Pooled estimator unbiased, but incorrect SE/t-stats because unit effect creates 
 ```{r}
 #Make some data to better control the relationships
 N<-seq(1,5,1)
-T<-seq(1,50,1)
-random<-expand.grid(N, T)
-names(random)<-c("N", "T")
+Time<-seq(1,50,1)
+random<-expand.grid(N, Time)
+names(random)<-c("N", "Time")
 random<- random %>% 
-  arrange(T, N)
+  arrange(Time, N)
 
 #Draw the unobserved effect, IV, DV, error
 Z<-rnorm(length(unique(random$N)), -2, .5)
-random$Z<-rep(Z, length(T))
+random$Z<-rep(Z, length(Time))
 random$X<-rnorm(nrow(random), 1, .25)
 random$Y<-3-2*random$X+4*random$Z+rnorm(nrow(random),0, .5)
 
@@ -339,7 +338,79 @@ re<-plm(Y~X, random, model = "random")
 summary(re)
 
 ```
-# Testing the validity of the RE assumption
+
+## Pooled model has incorrect variance
+```{r}
+#True error
+random$error <-random$Y-(3-2*random$X+4*random$Z)
+
+#Get estimated error from pooled model
+random$resid<-resid(random_pool)
+
+random %>%
+  dplyr::select(error, resid) %>%
+  pivot_longer(cols = everything()) %>%
+  ggplot()+
+  geom_histogram(aes(value, fill=name, alpha=.2))+
+  guides(alpha="none")
+
+e_resid = sum((random$resid)^2)/248
+e_error = sum((random$error)^2)/250
+
+e_resid
+e_error
+
+# How does this affect beta se and t-stats?
+sqrt(e_resid / sum((random$X - mean(random$X))^2))
+sqrt(e_error / sum((random$X - mean(random$X))^2))
+
+summary(random_pool)
+summary(re)
+
+```
+
+We can see that our SEs (and by extension t-stats) for the pooled model are incorrect.  This is becuase our estimate of $\sigma^2$ (variance of the error term) is wrong because the pooled estimator includes the effect of $Z$ on $Y$ in the variance.
+
+Random effects purge the variance contributed by $Z$ and therefore return SE that match SE calculated with the known error term.
+
+### Autocorrelation robust standard errors
+Since the pooled model is unbiased, we can simply correct the standard error esitmates.  Here using cluster-robust SE.
+
+However, cluster-robust SE are *asymptotically* correct and 5 is...not asymptotic
+```{r}
+
+coeftest(random_pool, vcov=vcovHC(random_pool, type = "HC0", group="N"))
+
+``` 
+
+These look very similar to our uncorrected SEs.
+
+Make the data bigger
+
+```{r}
+#Make some data to better control the relationships
+N_large<-seq(1,5000,1)
+Time<-seq(1,50,1)
+random_large<-expand.grid(N_large, Time)
+names(random_large)<-c("N", "Time")
+random_large<- random_large %>% 
+  arrange(Time, N)
+
+#Draw the unobserved effect, IV, DV, error
+Z_large<-rnorm(length(unique(random_large$N)), -2, .5)
+random_large$Z<-rep(Z_large, length(Time))
+random_large$X<-rnorm(nrow(random_large), 1, .25)
+random_large$Y<-3-2*random_large$X+4*random_large$Z+rnorm(nrow(random_large),0, .5)
+
+#Run the pooled model
+random_pool_large<-lm(Y~X, data=random_large)
+summary(random_pool_large, cluster="N")
+
+large_e_error <- sum((random_large$Y -(2*random_large$X+4*random_large$Z))^2)/(length(N_large))
+sqrt(large_e_error / sum((random_large$X - mean(random_large$X))^2))
+
+```
+## Testing the validity of the RE assumption
 
 In order to be unbiased, the Random Effects estimator requires that there is no correlation between the unit effects and the explanatory variables.
 
@@ -373,13 +444,13 @@ The risk of the RE model, then, can be thought of as correlation between these u
 
 The traditional approach comes from @mundlak1978pooling and involves estimating the following equation with the RE estimator:
 
-$Y_{it}=\beta_1X_{it}+\beta_2\overline{X_i}+\epsilon_{it}$
+$Y_{it}=\beta_1X_{it}+\beta_2\overline{X_i}+u_{it}$
 
 Where $\overline{X_i}$ is the unit level mean of $X$
 
 Alternatively, the time-specific realizations of $X$ can be within-transformed prior to estimation.
 
-$Y_{it}=\beta_1(X_{it}-\overline{X_i})+\beta_2\overline{X_i}+\epsilon_{it}$
+$Y_{it}=\beta_1(X_{it}-\overline{X_i})+\beta_2\overline{X_i}+u_{it}$
 
 
 The specific model you should use depends on which coefficients are more of interest: the individual or aggregate.  The former (Mundlak) specification facilitates interpretation of the aggregate (group mean) variable.
@@ -391,7 +462,7 @@ The group demeaning in the latter approach ensures that the individual realizati
 
 #First, we have to group demean
 demean_random<-random %>%
-  arrange(N,T)%>%
+  arrange(N,Time)%>%
   group_by(N) %>%
   mutate(mean_X=mean(X),
          demean_X=X-mean_X)
@@ -412,7 +483,7 @@ coef(mundlak)
 
 ```
 
-Again, we've successfully purged the coefficients on the individual realizations of $X$.  Our coefficient on $\overline{X}$ has changed.  The REWB estimate was `r coef(rebw)[3]` which we can see here is actually the sum of the between and within coefficients from the Mundlak estimator `r coef(mundlak)[3]` and `r coef(mundlak)[2]`
+Again, we've successfully purged the coefficients on the individual realizations of $X$.  Our coefficient on $\overline{X}$ has changed.  The REWB estimate was -56 which we can see here is actually the sum of the between and within coefficients from the Mundlak estimator of -54 and -2
 
 # Dynamic Models
 
@@ -617,7 +688,7 @@ But, with an LDV, serial correlation in the error creates bias.  (@achen2000lagg
 Need to be careful to ensure no serial correlation in error term of the model.
 
 ```{r}
-lmtest::bgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd)
+pbgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd, model="pooling")
 ```
 
 Fail to reject the null of no serial correlation.
@@ -653,4 +724,4 @@ summary(ah)
 
 Note that we've only used ivreg, which is standard 2SLS estimation (not 2SLS with FE).  This is because we've swept out the unit effects via first differencing already.
 
-#References
+# References
