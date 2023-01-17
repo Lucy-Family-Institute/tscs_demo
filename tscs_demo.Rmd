@@ -1,10 +1,10 @@
 ---
 title: "Time Series Cross Sectional (TSCS) Data Tutorial"
 output:
-  html_notebook:
+  html_document:
     toc: yes
     df_print: paged
-  html_document:
+  html_notebook:
     toc: yes
     df_print: paged
 date: "February 8, 2023"
@@ -51,7 +51,7 @@ set.seed(1015)
 # TSCS Data
 TSCS data have observations of multiple units *N* over time *T*.
 
-Each specific observation within the data is of one unit at one time, i.e.
+Each specific observation within the data is of one unit at one time, e.g.
 
 ```{r, warning=F, message=F}
 data<-read.dta13("ms_mil_spend_data.dta")
@@ -104,7 +104,7 @@ What are we assuming here?
 
 All of the $N$ units share a common intercept $\beta_0$ and a common slope $\beta_1$ on X.
 
-Standard OLS assumptions regarding the error term (specifically zero conditional mean)
+Standard OLS assumptions regarding the error term (specifically zero conditional mean and white noise errors)
 
 Whether pooling is appropriate depends on whether those assumptions are correct.  Note that these assumptions are not testable within the pooled model.
 
@@ -124,7 +124,6 @@ tibble(clean)
 clean$X<-rnorm(nrow(clean), 1, .25)
 clean$Y<-3-2*clean$X+rnorm(nrow(clean), 0, .5)
 tibble(clean)
-
 #Run the pooled model
 clean_pool<-lm(Y~X, data=clean)
 summary(clean_pool)
@@ -143,7 +142,7 @@ Pooled model works here because there is no difference in the underlying relatio
 
 Let's assume instead that there exists some unit-level heterogeneity.  Some $Z$ affects both $Y$ and $X$ but is time constant.
 
-You may recognize this as the setup for OVB.
+You may recognize this as the setup for omitted variable bias.
 
 ```{r}
 #Monte Carlo simulations to better control the relationships
@@ -165,6 +164,13 @@ dirty_pool<-lm(Y~X, data=dirty)
 summary(dirty_pool)
 
 #Plot the pooled model - what are we looking at?
+
+
+dirty %>%
+  ggplot(aes(x=X, y=Y))+
+  geom_point()+
+  geom_smooth(method=lm, se=F)
+
 dirty %>%
   ggplot(aes(x=X, y=Y))+
   geom_point(aes(color=as.factor(N)))+
@@ -177,6 +183,7 @@ dirty %>%
   geom_smooth(method=lm, se=F)
 
 ```
+
 In this case, pooling estimates a weak positive relationship between X and Y, despite the fact that the true relationship is negative.
 
 This occurs because there is omitted variable bias introduced by Z.
@@ -219,6 +226,7 @@ demean %>%
   geom_smooth(method=lm, se=F)
 
 ```
+
 ## Interpretation
 Interpretation is standard, but with a caveat
 ```{r}
@@ -226,13 +234,8 @@ summary(fe)
 sd(dirty$X)
 coef(fe)*sd(dirty$X)
 
-within<- dirty %>%
-  group_by(N) %>%
-  mutate(within=X-mean(X))%>%
-  dplyr::select(within)
-
-sd(within$within)
-coef(fe)*sd(within$within)
+sd(demean$demean_X)
+coef(fe)*sd(demean$demean_X)
 ```
 
 Takeaway: Coefficients on Linear FE regressors are correctly interpreted as the effect of a one unit increase in *the within unit* X.  The within unit variance is always no larger than the total variance in X (often significantly smaller, here about 1/2).  Calculate substantive effects using within X. (@mummolo2018improving)
@@ -254,9 +257,9 @@ time_inv %>%
   mutate(var_k=K-mean(K)) %>%
   select(var_k) %>%
   summary()
-
-#The FE estimator sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
 ```
+
+The FE estimator sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
 
 2. Loss of observations without variation in the DV in conditional logistic regression. 
 ```{r}
@@ -376,7 +379,7 @@ Random effects purge the variance contributed by $Z$ and therefore return SE tha
 ### Autocorrelation robust standard errors
 Since the pooled model is unbiased, we can simply correct the standard error esitmates.  Here using cluster-robust SE.
 
-However, cluster-robust SE are *asymptotically* correct and 5 is...not asymptotic
+However, cluster-robust SE are *asymptotically* correct (in the number of units $N$ *not* the number of observations). Our *N* is 5, which is...not asymptotic.
 ```{r}
 
 coeftest(random_pool, vcov=vcovHC(random_pool, type = "HC0", group="N"))
@@ -385,7 +388,7 @@ coeftest(random_pool, vcov=vcovHC(random_pool, type = "HC0", group="N"))
 
 These look very similar to our uncorrected SEs.
 
-Make the data bigger
+Make the data bigger.
 
 ```{r}
 #Make some data to better control the relationships
@@ -694,17 +697,19 @@ pbgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd, model="pooling")
 Fail to reject the null of no serial correlation.
 
 # Dynamic Panel Models
-If we assume unit effects that impact $Y$ (as in the FE case), the LDV model is biased (@wawro2002estimating is an accessible summary)  
+If we assume unit effects that impact $Y$ (as in the FE/RE case), the LDV model is biased, even if we do not assume correlation between the unit effects and included variables (@wawro2002estimating is an accessible summary).
 
-This is because the static individual effects are relegated to the error term.
+This is because the static individual effects are relegated to the error term.  The LDV is correlated with those static unit effects, so by putting it on the RHS we've created bias.
 
-The LDV is correlated with those static unit effects, so by putting it on the RHS we've created bias.
+Unlike in the static case, the FE estimator is also biased.  This bias is sometimes referred to as Nickell bias after @nickell1981biases.
 
-Unlike in the static case, the FE estimator does not remove the bias.
+Intuition here is that the transformed LDV and error are correlated. The group mean of the LDV contains all realizations of $Y$ minus the final observation of the unit.  Any $Y_t$ is correlated with the appropriate error $u_t$, which is introduced into the error term by the group difference.
+
+The FE estimator is consistent, but the asymptotics are in $T$ not $N$ - so in short panels the bias can be very large.
 
 ## Anderson-Hsiao Estimator
 
-1. First difference the regression equation to remove correlation between LDV and FE
+1. First difference the regression equation to remove correlation between LDV and FE (note this is not group demeaning, which would prevent valid instruments.)
 
 First differenced LDV is still correlated with first differenced error
 
