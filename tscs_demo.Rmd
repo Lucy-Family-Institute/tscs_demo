@@ -4,6 +4,8 @@ output:
   html_document:
     toc: yes
     df_print: paged
+  pdf_document:
+    toc: yes
   html_notebook:
     toc: yes
     df_print: paged
@@ -62,7 +64,7 @@ This observation is for the US (2) for the year 2000.
 
 ```{r}
 data %>% 
-  arrange(ccode, year) %>%
+  dplyr::arrange(ccode, year) %>%
   dplyr::select(ccode, year, LMILEX, v2x_polyarchy)
 
 data %>%
@@ -82,6 +84,7 @@ data %>%
   group_by(ccode) %>%
   summarize(between=mean(na.omit(LMILEX)))%>%
   dplyr::select(between) %>%
+  ungroup() %>%
   summary()
 
 #Within unit variation
@@ -90,6 +93,7 @@ data %>%
   mutate(between=mean(na.omit(LMILEX)),
          within=LMILEX-mean(na.omit(LMILEX))) %>%
   dplyr::select(within) %>%
+  ungroup() %>%
   summary()
 ```
 
@@ -104,9 +108,9 @@ What are we assuming here?
 
 All of the $N$ units share a common intercept $\beta_0$ and a common slope $\beta_1$ on X.
 
-Standard OLS assumptions regarding the error term (specifically zero conditional mean and white noise errors)
+Standard OLS assumptions regarding the error term (specifically zero conditional mean and white noise errors).
 
-Whether pooling is appropriate depends on whether those assumptions are correct.  Note that these assumptions are not testable within the pooled model.
+Whether pooling is appropriate depends on whether those assumptions are correct.
 
 ## Clean Pool
 ```{r}
@@ -116,7 +120,7 @@ Time<-seq(1,50,1)
 clean<-expand.grid(N, Time)
 names(clean)<-c("N", "Time")
 clean<- clean %>% 
-  arrange(N, Time)
+  dplyr::arrange(N, Time)
 
 tibble(clean)
 
@@ -151,7 +155,7 @@ Time<-seq(1,50,1)
 dirty<-expand.grid(N, Time)
 names(dirty)<-c("N", "Time")
 dirty<- dirty %>% 
-  arrange(Time, N)
+  dplyr::arrange(Time, N)
 
 #Draw the unobserved effect, IV, DV, error
 Z<-rnorm(length(unique(dirty$N)), 0, .5)
@@ -164,7 +168,6 @@ dirty_pool<-lm(Y~X, data=dirty)
 summary(dirty_pool)
 
 #Plot the pooled model - what are we looking at?
-
 
 dirty %>%
   ggplot(aes(x=X, y=Y))+
@@ -210,9 +213,9 @@ We can do this manually:
 
 ```{r}
 demean<-dirty %>%
-  arrange(N,Time)%>%
-  group_by(N) %>%
-  mutate(mean_X=mean(X),
+  dplyr::arrange(N,Time)%>%
+  dplyr::group_by(N) %>%
+  dplyr::mutate(mean_X=mean(X),
          mean_Y=mean(Y),
          demean_X=X-mean_X,
          demean_Y=Y-mean_Y)
@@ -226,6 +229,19 @@ demean %>%
   geom_smooth(method=lm, se=F)
 
 ```
+
+The within estimator is typically introduced with the dummy variable notation - where N indicators for each unit (or N-1 and the intercept).  These are equivalent in OLS (not in GLMs).  Most software (plm in R, xtreg, fe in Stata) uses the within transform  
+
+```{r}
+fe_dummy <-
+  lm(Y~X+as.factor(N)-1, data=dirty)
+
+summary(fe_dummy)
+summary(fe_manual)
+summary(fe)
+```
+
+Note that the standard errors are slightly different because the demeaned model doesn't have the right degrees of freedom.  You should use plm() for the within transform as it corrects for this.
 
 ## Interpretation
 Interpretation is standard, but with a caveat
@@ -256,18 +272,21 @@ time_inv %>%
   group_by(N) %>%
   mutate(var_k=K-mean(K)) %>%
   select(var_k) %>%
+  ungroup() %>%
   summary()
 ```
 
 The FE estimator sweeps out all variation on K, because K only has between-unit variance, not within unit variance.
 
-2. Loss of observations without variation in the DV in conditional logistic regression. 
+2. Loss of observations without variation in the DV in either conditional or unconditional logistic regression. 
 ```{r}
 data %>%
   group_by(ccode) %>%
   summarize(var_dem=var(na.omit(vdem_dem)))
 
-summary(clogit(vdem_dem~LMILEX+strata(ccode), data=data))
+logit<-clogit(vdem_dem~LMILEX+strata(ccode), data=data)
+summary(logit)
+
 ```
 A lot has been made of this issue, but does it matter? (@cook2020fixed)
 
@@ -282,9 +301,9 @@ Concrete issues:
 ### Penalized ML 
 @cook2020fixed recast the unconditional (unit-dummy) FE problem as one of *separation*.
 
-Separation occurs when a variable perfectly predicts the DV- here the unit does. (Imagine a 2x2 table, if one or more cells are empty, this is separation)
+Separation occurs when a variable perfectly predicts the DV- here the unit does. (Imagine a table of Y and N, if one or more cells are empty, this is separation)
 
-ML solutions *do not exist* under separation- the LL is flat because fit can always be improved by pushing the separating coefficient more towards negative (positive) infinity.  
+ML solutions *do not exist* under separation- the LL is flat because fit can always be improved by pushing the separating coefficient more towards negative (positive) infinity.
 
 Well known solution is to penalize the maximum likelihood to punish large coefficients (may be familiar as ridge/lasso, but specific penalty is different.)
 
@@ -293,6 +312,11 @@ penalized_fe<-glm(vdem_dem~LMILEX+as.factor(ccode), data=data,
                   familty="binomial"(link="logit"), method="brglmFit")
 summary(penalized_fe)
 ```
+Note that the unconditional FE estimator is biased due to the incidental parameters problem, which can be severe in small T.  Penalizing the ML does not change this. 
+
+Incidental parameters problem is just a special case of well known small sample bias of MLE (MLE is consistent, not unbiased, and consistency relies on asymptotics).
+
+As N grows without T, the number of 'incidental parameters' (the unit dummies) grows, so we are using T periods to estimate a greater and greater number of parameters.
 
 # Random Effects
 
@@ -312,7 +336,7 @@ Time<-seq(1,50,1)
 random<-expand.grid(N, Time)
 names(random)<-c("N", "Time")
 random<- random %>% 
-  arrange(Time, N)
+  dplyr::arrange(Time, N)
 
 #Draw the unobserved effect, IV, DV, error
 Z<-rnorm(length(unique(random$N)), -2, .5)
@@ -397,7 +421,7 @@ Time<-seq(1,50,1)
 random_large<-expand.grid(N_large, Time)
 names(random_large)<-c("N", "Time")
 random_large<- random_large %>% 
-  arrange(Time, N)
+  dplyr::arrange(Time, N)
 
 #Draw the unobserved effect, IV, DV, error
 Z_large<-rnorm(length(unique(random_large$N)), -2, .5)
@@ -436,7 +460,7 @@ t(coef(fe) - coef(re)[2])%*% solve(vcov(fe)-vcov(re)[2,2]) %*% (coef(fe)-coef(re
 
 The null hypothesis of the Hausman test is (roughly) that the coefficient vectors are equal in both the FE and RE models.  Rejection indicates the two vectors are statistically different.  Rejection is typically taken to suggest violation of the RE assumption.
 
-Recall that both the FE and RE models are consistent under the RE assumptions (the former is not efficient).  Thus, if the RE assumptions hold, we would not expect a difference.  In contrast, if the RE assumption regarding the correlation of the individual effects with the independent variables is violated, only the FE estimator is consistent and the RE estimator is biased.  Therefore, we would expect differences in the estimates.
+Recall that both the FE and RE models are unbiased under the RE assumptions (the former is not efficient).  Thus, if the RE assumptions hold, we would not expect a difference.  In contrast, if the RE assumption regarding the correlation of the individual effects with the independent variables is violated, only the FE estimator is unbiased and the RE estimator is biased.  Therefore, we would expect differences in the estimates.
 
 # The Within-Between Model
 Rather than choosing between fixed and random effects, we can estimate a compound model.
@@ -465,7 +489,7 @@ The group demeaning in the latter approach ensures that the individual realizati
 
 #First, we have to group demean
 demean_random<-random %>%
-  arrange(N,Time)%>%
+  dplyr::arrange(N,Time)%>%
   group_by(N) %>%
   mutate(mean_X=mean(X),
          demean_X=X-mean_X)
@@ -527,7 +551,7 @@ for (i in unique(data$ccode)){
   pvals<-rbind(pvals, dfuller$p.value)
 }
 
-pvals
+head(pvals)
 
 #Choi's P-value
 test_stat<- -2*sum(log(na.omit(pvals)))
@@ -691,10 +715,27 @@ But, with an LDV, serial correlation in the error creates bias.  (@achen2000lagg
 Need to be careful to ensure no serial correlation in error term of the model.
 
 ```{r}
-pbgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd, model="pooling")
+pbgtest(d_lmilex~lag_lmilex+d_polyarchy, data=fd, model="pooling", order=1)
+
+ldv<-plm(d_lmilex~lag_lmilex+d_polyarchy, data=fd, model="pooling")
+res_df <- data.frame(residual = residuals(ldv), attr(residuals(ldv), "index"))
+
+res_df<- res_df %>%
+  left_join(fd, by=c("ccode", "year"))
+
+res_df$lag_res <- lag(res_df$residual)
+
+res_df<-plm::pdata.frame(res_df, index=c("ccode", "year"))
+
+wooldridge <- plm(residual~lag_res, model="pooling", data=res_df)
+
+wooldridge_stat <- (coef(wooldridge)[2]+.5) / (sqrt(diag(vcov(wooldridge))[2]))
+
+round(pchisq(wooldridge_stat, 1, lower.tail = F), digits=3)
+
 ```
 
-Fail to reject the null of no serial correlation.
+Mixed results - Breusch - Godfrey test fails to reject, Wooldridge test rejects.
 
 # Dynamic Panel Models
 If we assume unit effects that impact $Y$ (as in the FE/RE case), the LDV model is biased, even if we do not assume correlation between the unit effects and included variables (@wawro2002estimating is an accessible summary).
@@ -725,8 +766,12 @@ In general, the AH estimator has been superseded by GMM estimators that build on
 fd$l2_lmilex=lag(fd$d_lmilex, 2)
 ah<-ivreg(d_lmilex~lag_lmilex+d_polyarchy| l2_lmilex+d_polyarchy, data=fd )
 summary(ah)
+
+
 ```
 
 Note that we've only used ivreg, which is standard 2SLS estimation (not 2SLS with FE).  This is because we've swept out the unit effects via first differencing already.
+
+
 
 # References
