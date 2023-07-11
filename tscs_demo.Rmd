@@ -49,6 +49,160 @@ library("lmtest")
 #setwd()
 set.seed(1015)
 ```
+# Review of OLS and the Linear Model
+Some clarification of terminology
+
+A linear regression models a dependent variable $Y$ as a function of one or more independent variables ($X$) and an error term $\epsilon$
+
+(Ordinary) Least Squares (OLS/LS) is a popular estimator of the linear model, but not the only estimator
+
+Ridge Regression / Lasso are examples of other estimators of the linear model
+
+From an ML perspective, linear regression is a form of supervised learning while OLS is uses error minimization as measured by the sum of squared residuals
+
+## Intuition
+Create a univariate linear relationship using a Monte Carlo simulation
+
+```{r, warning=F, message=F}
+sample <- 200
+x <- rnorm(sample, 0, 2)
+e <- rnorm(sample, 0 , 10)
+y <- 3 + x + e
+univariate <- data.frame(y, x)
+univariate
+
+plot<-univariate %>%
+  ggplot(aes(x, y)) +
+  geom_point()
+
+plot
+```
+
+Estimating a univariate linear model is equivalent to drawing a straight line through this scatter plot
+
+Can fit any number of linear models to this data - need a criteria for determining the best model
+
+OLS posits that the best model is one that minimizes the error of the model's predicted $Y$ and the real $Y$
+
+OLS measures model error as the sum of squared resiudals
+
+```{r}
+univariate$pred <- predict(lm(y~x, data=univariate))
+univariate$resid <- univariate$y - univariate$pred
+
+univariate %>%
+  ggplot(aes(x, y)) +
+  geom_point()+
+  geom_smooth(method = "lm", se=F)+
+  geom_segment(aes(xend=x, yend = pred), color="red")
+```
+
+## Formalization
+
+Write the unknown, but linear, data generating process for $Y$ as 
+
+$$ Y = \beta_0 + \beta_1X + \epsilon $$
+Our linear model returns estimates of coefficients, $\beta$, which we denote with $\hat{}$.  We use these estimates to construct the estimate of $Y$
+
+$$\hat{Y} = \hat{\beta_0} + \hat{\beta_1}X $$
+We define the residual $e$ as the difference between $Y$ and its estimate $\hat{Y}$, which we use as an estimate of the unknown disturbance $\epsilon$.  Note that we move to estimates for an individual observation $i$ below:
+
+$$ e_i = \hat{y}_i - y_i$$
+Finally, we denote the residual sum of squares (RSS) as the sum of the squared residuals for all observations in the data
+
+$$ RSS = \sum_{i=1}^{n}e_i^2$$
+OLS estimates the coefficients $\beta$ that minimize $RSS$.  These can be shown to be:
+
+$$\hat{\beta_1} = \frac{\sum_{i=1}^{n}(x_i - \overline{x})(y_i - \overline{y})}{\sum_{i=1}^{n}(x_i - \overline{x})^2}$$
+$$\hat{\beta_0} = \overline{y} - \hat{\beta_1}\overline{x}$$
+Given that the coefficient estimates that minimize $RSS$ are known there is no need to perform model training or tuning to estimate them - they can be calculated directly from the data
+
+```{r}
+coef(lm(y~x, data=univariate))
+
+mean_x <- mean(x)
+mean_y <- mean(y)
+beta1_hat <-(sum((univariate$x - mean_x)*(univariate$y - mean_y)))/(sum((univariate$x-mean_x)^2))
+beta0_hat <- mean_y - beta1_hat*mean_x
+print(c(beta0_hat, beta1_hat))
+```
+
+## What's Special About RSS?
+Under certain assumptions, OLS is the 'best' estimator for the linear model
+
+*Zero conditional mean assumption* (along with some other technical assumptions) is sufficient to ensure unbiasedness ($E(\hat{\beta})=\beta$):
+
+$$E(\epsilon|X) = 0 $$
+Note that this is an assumption about the unobserved error $\epsilon$ and cannot be tested - OLS will fit residual $e$ that is mean zero whether or not it's appropriate
+
+The additional assumption of *Homoskedastic and Serially Uncorrelated Errors* makes OLS the Minimum Variance Unbiased Linear Estimator
+
+$$Var(\epsilon | X) = \sigma^2 $$
+$$Corr(\epsilon_t, \epsilon_s) = 0, \forall t \neq s $$
+Informally, these two assumptions ensure that of all the unbiased linear estimators of the linear model, OLS has the smallest variance
+
+This does not mean OLS is the absolute best model in any circumstances. 
+
+If the standard errors are not white noise, then non-linear unbiased estimators may offer improvement, such as trimmed least squares
+
+If the errors are white-noise, variance may be reduced by using a biased estimator, such as ridge regression
+
+## Coefficient Variance
+
+OLS is unbaised, but any individual estimate of $\hat\beta$ may be far from $\beta$
+
+The variance of $\hat\beta_1$ is a function of the variance of the error and the variance of $X$
+
+Higher variance in the error makes estimation less precise while higher variance in $X$ makes it more precise:
+
+$$ Var(\hat\beta_1) = \frac{\sigma^2}{\sum_{i=1}^n(x_i-\overline{x})^2} $$
+Denominator is known as a function of the data - numerator is unknown and must be estimated
+
+An unbiased estimator of $\sigma^2$ is $RSS/(n-2)$ where $n-2$ is a degrees of freedom adjustment due to constraints of OLS
+
+For test statistics, we work with the standard error of the coefficient, as opposed to the variance
+
+$$se(\hat\beta_1) = \sqrt\frac{\sigma^2}{\sum_{i=1}^n(x_i-\overline{x})^2} = \sqrt\frac{RSS/(n-2)}{\sum_{i=1}^n(x_i-\overline{x})^2} $$
+
+# Frequentist Statistical Inference
+Fundamental question: does $X$ effect $Y$?
+
+Frequentist inference begins by assuming the opposite. We refer to this as the null hypothesis:
+
+$H_0$: There is no relationship between $X$ and $Y$
+
+Under the null hypothesis - what do we expect $\hat\beta_1$ to be?
+
+Statistically, we want to test how likely our estimate of $\hat\beta_1$ under the null hypothesis - in other words if the effect of $X$ is zero, how unlikely is our estimate?
+
+This depends on the coefficient and it's variance, which we use to construct a t-statistic:
+
+$$t = \frac{\hat\beta_1 - \beta_{1|H_0}}{se(\hat\beta_1)} $$
+
+Under the *normality assumption*:
+
+$$ \epsilon \sim Normal(0, \sigma^2) $$
+
+The t-statistic follows a t-distribution with n-k-1 degrees of freedom. Knowing this we can calculate a *p-value* which represents the probability that we could draw a test statistic at least as large as $T$ (one tailed test) or at least as large as $|T|$ (two tailed)
+
+## Manual Illustration
+```{r}
+univariate$y_hat = beta0_hat + beta1_hat * univariate$x
+rss = sum((univariate$y_hat - univariate$y)^2)
+se_beta1 <- sqrt(
+  (rss/(sample-2))/
+    sum((univariate$x - mean_x)^2)
+  )
+t <- beta1_hat/se_beta1
+p <- 2*pt(abs(t), df=sample-2, lower=F)
+print(c(t, p))
+```
+## LM Function
+```{r}
+lm <- lm(y~x, data=univariate)
+summary(lm)
+plot(lm)
+```
 
 # TSCS Data
 TSCS data have observations of multiple units *N* over time *T*.
@@ -100,9 +254,9 @@ data %>%
 # Pooling
 The simplest approach to estimating a model on TSCS is to pool the data:
 
-$Y_{it}=\beta_0+\beta_1X_{it}+u_{it}$
+$Y_{it}=\beta_0+\beta_1X_{it}+e_{it}$
 
-Where Y is the DV, X is the IV, $\beta_0$ is the intercept, $\beta_1$ is the coefficient on X and $u_{it}$ is the error.
+Where Y is the DV, X is the IV, $\beta_0$ is the intercept, $\beta_1$ is the coefficient on X and $e_{it}$ is the error.
 
 What are we assuming here?
 
@@ -136,7 +290,7 @@ summary(clean_pool)
 clean %>%
   ggplot(aes(x=X, y=Y))+
   geom_point(aes(color=as.factor(N)))+
-  geom_smooth(method=lm)
+  geom_smooth(method="lm", se=F)
 
 ```
 
@@ -172,18 +326,18 @@ summary(dirty_pool)
 dirty %>%
   ggplot(aes(x=X, y=Y))+
   geom_point()+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 dirty %>%
   ggplot(aes(x=X, y=Y))+
   geom_point(aes(color=as.factor(N)))+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 #Plot the per unit regressions
 dirty %>%
   ggplot(aes(x=X, y=Y, color=as.factor(N)))+
   geom_point()+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 ```
 
@@ -191,7 +345,7 @@ In this case, pooling estimates a weak positive relationship between X and Y, de
 
 This occurs because there is omitted variable bias introduced by Z.
 
-Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+u_{it}$
+Note that pooling would be fine if we could estimate $Y_{it}=\beta_1X_{it}+\beta_2Z_i+e_{it}$
 
 # Fixed Effects
 With TSCS data that contains time-constant unit-level omitted variable bias, fixed effects can be used to estimate the unbiased relationship, even if the omitted variable $Z$ is not observed.
@@ -226,7 +380,7 @@ summary(fe_manual)
 demean %>%
   ggplot(aes(x=demean_X, y=demean_Y))+
   geom_point(aes(color=as.factor(N)))+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 ```
 
@@ -271,8 +425,8 @@ summary(drop_model)
 time_inv %>%
   group_by(N) %>%
   mutate(var_k=K-mean(K)) %>%
-  select(var_k) %>%
   ungroup() %>%
+  select(var_k) %>%
   summary()
 ```
 
@@ -352,13 +506,13 @@ summary(random_pool)
 random %>%
   ggplot(aes(x=X, y=Y))+
   geom_point(aes(color=as.factor(N)))+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 #Plot unit intercepts/slopes
 random %>%
   ggplot(aes(x=X, y=Y, color=as.factor(N)))+
   geom_point()+
-  geom_smooth(method=lm, se=F)
+  geom_smooth(method="lm", se=F)
 
 #RE estimator
 re<-plm(Y~X, random, model = "random")
@@ -471,13 +625,13 @@ The risk of the RE model, then, can be thought of as correlation between these u
 
 The traditional approach comes from @mundlak1978pooling and involves estimating the following equation with the RE estimator:
 
-$Y_{it}=\beta_1X_{it}+\beta_2\overline{X_i}+u_{it}$
+$Y_{it}=\beta_1X_{it}+\beta_2\overline{X_i}+e_{it}$
 
 Where $\overline{X_i}$ is the unit level mean of $X$
 
 Alternatively, the time-specific realizations of $X$ can be within-transformed prior to estimation.
 
-$Y_{it}=\beta_1(X_{it}-\overline{X_i})+\beta_2\overline{X_i}+u_{it}$
+$Y_{it}=\beta_1(X_{it}-\overline{X_i})+\beta_2\overline{X_i}+e_{it}$
 
 
 The specific model you should use depends on which coefficients are more of interest: the individual or aggregate.  The former (Mundlak) specification facilitates interpretation of the aggregate (group mean) variable.
@@ -744,9 +898,9 @@ This is because the static individual effects are relegated to the error term.  
 
 Unlike in the static case, the FE estimator is also biased.  This bias is sometimes referred to as Nickell bias after @nickell1981biases.
 
-Intuition here is that the transformed LDV and error are correlated. The group mean of the LDV contains all realizations of $Y$ minus the final observation of the unit.  Any $Y_t$ is correlated with the appropriate error $u_t$, which is introduced into the error term by the group difference.
+Intuition here is that the transformed LDV and error are correlated. The group mean of the LDV contains all realizations of $Y$ minus the final observation of the unit.  Any $Y_t$ is correlated with the appropriate error $e_t$, which is introduced into the error term by the group difference.
 
-The FE estimator is consistent, but the asymptotics are in $T$ not $N$ - so in short panels the bias can be very large.
+Bias is decreasing in $T$ not $N$ - so in short panels the bias can be very large.
 
 ## Anderson-Hsiao Estimator
 
