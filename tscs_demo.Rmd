@@ -206,8 +206,9 @@ Note that our new estimate for $\hat\beta_1$ is identical to our old estimate ex
 
 The specific form of these variances and covariances is slightly different - note no means! We've applied two simplifications to drop means
 
-1) $E[\hat{r}] = 0 $ by regression assumptions
-2) $Cov(x, y) = \sum_{i=1}^{n}(x_i - \overline{x})(y_i - \overline{y}) = \sum_{i=1}^{n}(x_i - \overline{x})y_i $
+$$ E[\hat{r}] = 0 $$
+
+$$ Cov(x, y) = \sum_{i=1}^{n}(x_i - \overline{x})(y_i - \overline{y}) = \sum_{i=1}^{n}(x_i - \overline{x})y_i $$
 
 ### Illustration of Multiple Regression by Partial Regression
 
