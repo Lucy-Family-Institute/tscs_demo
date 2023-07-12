@@ -9,7 +9,7 @@ output:
   html_notebook:
     toc: yes
     df_print: paged
-date: "February 8, 2023"
+date: "June 14, 2023"
 link-citations: yes
 bibliography: ref.bib
 ---
@@ -34,7 +34,7 @@ The second section focuses on issues related to time.  We start by considering t
 *install.packages()* and *library()* for package downloads and loading.  Here we'll load some useful packages [c converts elements into a vector]
 
 ```{r, results='hide', message=F, warning=F}
-#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest", "tseries"))
+#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest", "tseries", "plotly"))
 library("tidyverse")
 library("tseries")
 library("data.table")
@@ -45,6 +45,7 @@ library("survival")
 library("brglm2")
 library("ivreg")
 library("lmtest")
+library("plotly")
 
 #setwd()
 set.seed(1015)
@@ -75,7 +76,7 @@ plot<-univariate %>%
   ggplot(aes(x, y)) +
   geom_point()
 
-plot
+ggplotly(plot)
 ```
 
 Estimating a univariate linear model is equivalent to drawing a straight line through this scatter plot
@@ -90,11 +91,13 @@ OLS measures model error as the sum of squared resiudals
 univariate$pred <- predict(lm(y~x, data=univariate))
 univariate$resid <- univariate$y - univariate$pred
 
-univariate %>%
+resid_plot<-univariate %>%
   ggplot(aes(x, y)) +
   geom_point()+
   geom_smooth(method = "lm", se=F)+
   geom_segment(aes(xend=x, yend = pred), color="red")
+
+ggplotly(resid_plot)
 ```
 
 ## Formalization
@@ -111,9 +114,11 @@ $$ e_i = \hat{y}_i - y_i$$
 Finally, we denote the residual sum of squares (RSS) as the sum of the squared residuals for all observations in the data
 
 $$ RSS = \sum_{i=1}^{n}e_i^2$$
-OLS estimates the coefficients $\beta$ that minimize $RSS$.  These can be shown to be:
+OLS estimates the coefficients $\beta$ that minimize $RSS$.  For the simple bivariate case the coefficient on $X$ is simply the ratio of it's covariance with $Y$ over its variance:
 
 $$\hat{\beta_1} = \frac{\sum_{i=1}^{n}(x_i - \overline{x})(y_i - \overline{y})}{\sum_{i=1}^{n}(x_i - \overline{x})^2}$$
+The constant is simply the difference between the mean of $Y$ and the predicted $Y$ at the mean of $X$
+
 $$\hat{\beta_0} = \overline{y} - \hat{\beta_1}\overline{x}$$
 Given that the coefficient estimates that minimize $RSS$ are known there is no need to perform model training or tuning to estimate them - they can be calculated directly from the data
 
@@ -141,11 +146,11 @@ $$Var(\epsilon | X) = \sigma^2 $$
 $$Corr(\epsilon_t, \epsilon_s) = 0, \forall t \neq s $$
 Informally, these two assumptions ensure that of all the unbiased linear estimators of the linear model, OLS has the smallest variance
 
-This does not mean OLS is the absolute best model in any circumstances. 
+This does not mean OLS is the absolute best model in any circumstance 
 
-If the standard errors are not white noise, then non-linear unbiased estimators may offer improvement, such as trimmed least squares
+If the standard errors satisfy the above assumptions, but are not normally distributed, then non-linear unbiased estimators may offer improvement, such as trimmed least squares
 
-If the errors are white-noise, variance may be reduced by using a biased estimator, such as ridge regression
+Variance may be reduced by using a biased estimator, such as ridge regression
 
 ## Coefficient Variance
 
@@ -163,6 +168,64 @@ An unbiased estimator of $\sigma^2$ is $RSS/(n-2)$ where $n-2$ is a degrees of f
 For test statistics, we work with the standard error of the coefficient, as opposed to the variance
 
 $$se(\hat\beta_1) = \sqrt\frac{\sigma^2}{\sum_{i=1}^n(x_i-\overline{x})^2} = \sqrt\frac{RSS/(n-2)}{\sum_{i=1}^n(x_i-\overline{x})^2} $$
+
+## Multiple Regression
+
+Consider a linear model where $Y$ is a function of two independent variables:
+
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \epsilon$$
+```{r}
+x1 <- rnorm(sample, 0, 5)
+x2 <- 2*x1 + rnorm(sample, 0, 5)
+y <- 2*x1-x2+rnorm(sample, 0,5)
+
+multivariate <- data.frame(x1, x2, y)
+
+multi_plot<-plot_ly(multivariate, x = ~x1, y = ~x2, z = ~y)
+multi_plot<-multi_plot %>%
+  add_markers()
+multi_plot
+```
+
+Estimation of this linear model via OLS is similar
+
+Recall OLS minimizes $RSS$
+
+$$ RSS = \sum_{i=1}^{n}e_i^2$$
+$$ = \sum_{i=1}^{n}(\hat{y_i} - y_i)^2 $$
+$$ = \sum_{i=1}^{n}((\hat{\beta_0} + \hat{\beta_1}X_{1i} + \hat{\beta_2}X_{2i}) - y_i)^2 $$
+When we model $Y$ as a function of $X_2$ OLS minimizes $RSS$ over both $X$
+
+The formula for coefficients of multivariate regression are more complicated, but one representation:
+
+$$\hat\beta_1 = \frac{\sum_{i=1}^{n}\hat{r_{i1}}y_i}{\sum_{i=1}^{n}(\hat{r_{i1}})^2} $$
+Where $\hat{r_{i1}}$ is the residual from the auxiliary regression of $X1$ on $X2$
+
+$$ X_1 = \hat\gamma_0+\hat\gamma_1{X_2} + \hat{r_1} $$
+Note that our new estimate for $\hat\beta_1$ is identical to our old estimate except that $Cov(\hat{r}, y)$ and $Var(\hat{r})$ have replaced $Cov{x, y}$ and $Var(x)$ respectively
+
+The specific form of these variances and covariances is slightly different - note no means! We've applied two simplifications to drop means
+
+1) $E[\hat{r}] = 0 $ by regression assumptions
+2) $Cov(x, y) = \sum_{i=1}^{n}(x_i - \overline{x})(y_i - \overline{y}) = \sum_{i=1}^{n}(x_i - \overline{x})y_i $
+
+### Illustration of Multiple Regression by Partial Regression
+
+```{r}
+multivariate$resid <- residuals(lm(x1~x2, multivariate))
+partial <- lm(y~resid, multivariate)
+full <- lm(y~x1+x2, multivariate)
+
+print(c(coef(partial), coef(full)))
+```
+### Illustration of Omitted Variable Bias
+```{r}
+short <- lm(y~x1, multivariate)
+print(coef(short))
+aux <- lm(x2~x1, multivariate)
+coef(full)[2] + coef(full)[3]*coef(aux)[2]
+
+```
 
 # Frequentist Statistical Inference
 Fundamental question: does $X$ effect $Y$?
@@ -184,6 +247,8 @@ Under the *normality assumption*:
 $$ \epsilon \sim Normal(0, \sigma^2) $$
 
 The t-statistic follows a t-distribution with n-k-1 degrees of freedom. Knowing this we can calculate a *p-value* which represents the probability that we could draw a test statistic at least as large as $T$ (one tailed test) or at least as large as $|T|$ (two tailed)
+
+Note that normality implies homoskedasticity
 
 ## Manual Illustration
 ```{r}
