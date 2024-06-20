@@ -32,18 +32,9 @@ The second section focuses on issues related to time.  We start by considering t
 *install.packages()* and *library()* for package downloads and loading.  Here we'll load some useful packages [c converts elements into a vector]
 
 ```{r, results='hide', message=F, warning=F}
-#install.packages(c("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest", "tseries", "plotly"))
-library("tidyverse")
-library("tseries")
-library("data.table")
-library("readstata13")
-library("plm")
-library("bife")
-library("survival")
-library("brglm2")
-library("ivreg")
-library("lmtest")
-library("plotly")
+if (!require("pacman")) install.packages("pacman", repos = "https://cloud.r-project.org")
+
+pacman::p_load("tidyverse", "data.table", "readstata13", "plm", "bife", "survival", "brglm2", "ivreg", "lmtest", "tseries", "plotly")
 
 #setwd()
 set.seed(1015)
