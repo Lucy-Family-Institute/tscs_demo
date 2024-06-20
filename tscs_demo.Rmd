@@ -4,12 +4,10 @@ output:
   html_document:
     toc: yes
     df_print: paged
-  pdf_document:
-    toc: yes
   html_notebook:
     toc: yes
     df_print: paged
-date: "June 14, 2023"
+date: "June 21, 2024"
 link-citations: yes
 bibliography: ref.bib
 ---
@@ -199,10 +197,10 @@ When we model $Y$ as a function of $X_2$ OLS minimizes $RSS$ over both $X$
 The formula for coefficients of multivariate regression are more complicated, but one representation:
 
 $$\hat\beta_1 = \frac{\sum_{i=1}^{n}\hat{r_{i1}}y_i}{\sum_{i=1}^{n}(\hat{r_{i1}})^2} $$
-Where $\hat{r_{i1}}$ is the residual from the auxiliary regression of $X1$ on $X2$
+Where $\hat{r_{i1}}$ is the residual from the auxiliary regression of $X_1$ on $X_2$
 
 $$ X_1 = \hat\gamma_0+\hat\gamma_1{X_2} + \hat{r_1} $$
-Note that our new estimate for $\hat\beta_1$ is identical to our old estimate except that $Cov(\hat{r}, y)$ and $Var(\hat{r})$ have replaced $Cov{x, y}$ and $Var(x)$ respectively
+Note that our new estimate for $\hat\beta_1$ is identical to our old estimate except that $Cov(\hat{r}, y)$ and $Var(\hat{r})$ have replaced $Cov(x, y)$ and $Var(x)$ respectively
 
 The specific form of these variances and covariances is slightly different - note no means! We've applied two simplifications to drop means
 
@@ -219,6 +217,8 @@ full <- lm(y~x1+x2, multivariate)
 
 print(c(coef(partial), coef(full)))
 ```
+
+
 ### Illustration of Omitted Variable Bias
 ```{r}
 short <- lm(y~x1, multivariate)
@@ -227,6 +227,13 @@ aux <- lm(x2~x1, multivariate)
 coef(full)[2] + coef(full)[3]*coef(aux)[2]
 
 ```
+
+This shows the relationship between the coefficients of the correct regression with $X_2$ and what is called the 'short' regression (because it's short $X_2$) where $Y$ is regressed on $X$ alone
+
+$$ \tilde\beta_1 = \hat{\beta_1} + \hat{\beta_2}\hat{\gamma_1}$$
+Where $\tilde{\beta_1}$ is the coefficient on $X_1$ from the short regression. The second term is the omitted variable bias from the exclusion of $X_2$ - the effect of $X_2$ on $Y$ (controlling for $X_1$) as well as the effect of $X_2$ on $X_1$ from the auxiliary regression ($\hat{\gamma_1}$)
+
+Can $\tilde{\beta_1} = \hat{\beta_1}$?
 
 # Frequentist Statistical Inference
 Fundamental question: does $X$ effect $Y$?
@@ -730,7 +737,7 @@ coef(mundlak)
 
 ```
 
-Again, we've successfully purged the coefficients on the individual realizations of $X$.  Our coefficient on $\overline{X}$ has changed.  The REWB estimate was -56 which we can see here is actually the sum of the between and within coefficients from the Mundlak estimator of -54 and -2
+Again, we've successfully purged the coefficients on the individual realizations of $X$.  Our coefficient on $\overline{X}$ has changed.  The REWB estimate was -5.2 which we can see here is actually the sum of the between and within coefficients from the Mundlak estimator of -3.2 and -2
 
 # Dynamic Models
 
@@ -748,6 +755,56 @@ data %>%
 
 ## Panel Unit Root Testing
 
+### Single TS Unit Root Testing
+Many time series are persistent - current values depend on past values.
+
+Formally, we can define an autoregressive process of order one AR(1) series as one that can be written
+
+$$Y_t = \rho_1Y_{t-1}+\epsilon_t$$
+where $\epislon_t$ is iid.  Order one means that $Y$ is only a function of one past realization. 
+
+$Y$ is *stationariy* if $|\rho_1| < 1$. Informally, this means the correlations between $Y$ and its past realizations is asymptotically 0.  Over a long enough time period, the past is irrelevant.
+
+When $|\rho_1| = 1$ $Y$ is said to have a *unit root.*  We also call such a series as *integrated* of order one, or I(1).  An I(1) series is only one type of unit root, and determining which kind of unit root is difficult.
+
+Such series are problematic for modeling.  First, correlations with the past do not die out, even asymptotically.  Second, unit root series have increasing variance over time, meaning the central limit theorem does not hold (test statistics are asymptotically normal), so no hypothesis tests are valid.  Third, regressions with non-stationary variables can produce spurious inferences - two integrated series are correlated due to integration, not a causal relationship.
+
+Let's see:
+
+```{r}
+errors <- rnorm(1001,0,1)
+unit_root <- cumsum(errors)
+unit_root_data <- data.frame(error=errors, unit_root=unit_root, time=seq(1,1001,1))
+unit_root_data <- unit_root_data %>%
+  mutate(stationary1 = .5*dplyr::lag(error)+rnorm(1,0,1),
+         stationary2 = .9*dplyr::lag(error)+rnorm(1,0,1),
+         first_diff = unit_root - dplyr::lag(unit_root)) 
+unit_root_data %>%
+  dplyr::select(-error) %>%
+  pivot_longer(-time) %>%
+  ggplot(aes(y=value, x=time, color=name))+
+  geom_line()
+```
+You can see that over a long enough time period the persistence of the series is irrelevant - it's still mean reverting.  In contrast, the unit root gets "stuck" at high or low values and stays there.  Typically these are less obvious.
+
+I(1) series are *difference stationary* meaning that if we subtract the prior value, the series is stationary.
+
+$$Y_t = \rho_1Y_{t-1}+\epsilon_t$$
+$$Y_t = Y_{t-1}+\epsilon_t$$
+$$Y_t - Y_{t-1} = \epsilon_t$$
+Typically we denote a differenced series with $\Delta$, e.g. $\Delta Y$
+
+#### Augmented Dickey-Fuller Test
+
+If a series has a unit root, then $\rho$ = 1.  We could formally test this with a regression of $Y_t$ against its past values, and use a hypothesis test on the coefficient. This is the basis of the Dickey-Fuller test.  However, we use different critical values since the central limit theorem is violated by a unit root, and we typically use the Augmented Dickey-Fuller, which includes additional lags to clean up residual serial correlation.  Note, that the function we're using automatically determines these based on series length. 
+
+```{r}
+apply(unit_root_data, 2, function(x) tseries::adf.test(na.omit(x)))
+```
+
+As noted by the test, the null hypothesis is that the series has a unit root.  Thus at a small p-value we reject the null and treat the series as stationary. 
+
+### Back to Panels
 Panel unit root testing is difficult and R implementations are somewhat basic
 
 We can perform our own test via the p-value aggregation method of @choi2001unit
@@ -849,6 +906,7 @@ pred_dat$milex_hat<-pred_dat$dem*coef(lag1)[2]+pred_dat$lag_dem*coef(lag1)[3]
 pred_dat %>%
   ggplot(aes(x=time, y=milex_hat))+
   geom_line()
+
 ```
 
 If the regression equation is $Y_t=\beta_0+\beta_1X_t+\beta_2X_{t-1}+\epsilon_t$
