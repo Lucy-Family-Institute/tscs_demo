@@ -29,7 +29,7 @@ The second section focuses on issues related to time.  We start by considering t
 [Rstudio IDE](https://www.rstudio.com/products/rstudio/download/)
 
 ## Packages
-*install.packages()* and *library()* for package downloads and loading.  Here we'll load some useful packages [c converts elements into a vector]
+*install.packages()* and *library()* are common package downloads and loading.  Here we'll load some useful packages. *pacman::pload()* combines both of these in one function.
 
 ```{r, results='hide', message=F, warning=F}
 if (!require("pacman")) install.packages("pacman", repos = "https://cloud.r-project.org")
@@ -135,7 +135,7 @@ $$Var(\epsilon | X) = \sigma^2 $$
 $$Corr(\epsilon_t, \epsilon_s) = 0, \forall t \neq s $$
 Informally, these two assumptions ensure that of all the unbiased linear estimators of the linear model, OLS has the smallest variance
 
-This does not mean OLS is the absolute best model in any circumstance 
+This does not mean OLS is the absolute best estimator in any circumstance 
 
 If the standard errors satisfy the above assumptions, but are not normally distributed, then non-linear unbiased estimators may offer improvement, such as trimmed least squares
 
@@ -185,7 +185,7 @@ $$ = \sum_{i=1}^{n}(\hat{y_i} - y_i)^2 $$
 $$ = \sum_{i=1}^{n}((\hat{\beta_0} + \hat{\beta_1}X_{1i} + \hat{\beta_2}X_{2i}) - y_i)^2 $$
 When we model $Y$ as a function of $X_2$ OLS minimizes $RSS$ over both $X$
 
-The formula for coefficients of multivariate regression are more complicated, but one representation:
+The formulas for coefficients of multivariate regression are more complicated, but one representation:
 
 $$\hat\beta_1 = \frac{\sum_{i=1}^{n}\hat{r_{i1}}y_i}{\sum_{i=1}^{n}(\hat{r_{i1}})^2} $$
 Where $\hat{r_{i1}}$ is the residual from the auxiliary regression of $X_1$ on $X_2$
@@ -752,7 +752,7 @@ Many time series are persistent - current values depend on past values.
 Formally, we can define an autoregressive process of order one AR(1) series as one that can be written
 
 $$Y_t = \rho_1Y_{t-1}+\epsilon_t$$
-where $\epislon_t$ is iid.  Order one means that $Y$ is only a function of one past realization. 
+where $\epsilon_t$ is iid.  Order one means that $Y$ is only a function of one past realization. 
 
 $Y$ is *stationariy* if $|\rho_1| < 1$. Informally, this means the correlations between $Y$ and its past realizations is asymptotically 0.  Over a long enough time period, the past is irrelevant.
 
@@ -776,6 +776,7 @@ unit_root_data %>%
   ggplot(aes(y=value, x=time, color=name))+
   geom_line()
 ```
+
 You can see that over a long enough time period the persistence of the series is irrelevant - it's still mean reverting.  In contrast, the unit root gets "stuck" at high or low values and stays there.  Typically these are less obvious.
 
 I(1) series are *difference stationary* meaning that if we subtract the prior value, the series is stationary.
@@ -928,7 +929,7 @@ lrm<-coef(ldv)[3]*sd(na.omit(fd$d_polyarchy))/(1-coef(ldv)[2])
 lrm
 ```
 
-In the case of a temporary shock to X, the effect decays geometrically by assumption (e.g., forced by the assumption of the model)
+In the case of a temporary shock to X, the effect decays geometrically by assumption (forced by the assumption of the model)
 
 To see that, let's consider the effect of $X_t$ at time $t+1$ and $t+2$
 
